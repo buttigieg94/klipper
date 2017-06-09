@@ -6,7 +6,7 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import sys, optparse, ConfigParser, logging, time, threading
 import util, reactor, queuelogger, msgproto, gcode
-import pins, mcu, chipmisc, toolhead, extruder, fan, heater, servo
+import pins, mcu, chipmisc, toolhead, extruder, fan, heater, servo, probe
 
 message_ready = "Printer is ready"
 
@@ -172,7 +172,8 @@ class Printer:
             ConfigLogger(self.fileconfig, self.bglogger)
         # Create printer components
         config = ConfigWrapper(self, 'printer')
-        for m in [pins, mcu, chipmisc, toolhead, extruder, fan, heater, servo]:
+        for m in [pins, mcu, chipmisc, toolhead, extruder, fan, heater, servo
+                  probe]:
             m.add_printer_objects(self, config)
         self.mcu = self.objects['mcu']
         # Validate that there are no undefined parameters in the config file

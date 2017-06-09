@@ -28,6 +28,9 @@ class CoreXYKinematics:
         self.steppers[1].set_max_jerk(max_xy_halt_velocity, max_accel)
         max_z_halt_velocity = toolhead.get_max_axis_halt(self.max_z_accel)
         self.steppers[2].set_max_jerk(max_z_halt_velocity, self.max_z_accel)
+    def get_position(self):
+        pos = [s.mcu_stepper.get_commanded_position() for s in self.steppers]
+        return [0.5 * (pos[0] + pos[1]), 0.5 * (pos[0] - pos[1]), pos[2]]
     def set_position(self, newpos):
         pos = (newpos[0] + newpos[1], newpos[0] - newpos[1], newpos[2])
         for i in StepList:
@@ -84,6 +87,8 @@ class CoreXYKinematics:
     def query_endstops(self, print_time):
         endstops = [(s, s.query_endstop(print_time)) for s in self.steppers]
         return [(s.name, es.query_endstop_wait()) for s, es in endstops]
+    def get_z_steppers(self):
+        return [self.steppers[2]]
     def _check_endstops(self, move):
         end_pos = move.end_pos
         for i in StepList:
