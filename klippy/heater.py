@@ -127,6 +127,8 @@ class PrinterHeater:
             self.mcu_pwm.setup_cycle_time(PWM_CYCLE_TIME)
         self.mcu_pwm.setup_max_duration(MAX_HEAT_TIME)
         self.mcu_adc = pins.setup_pin(printer, 'adc', config.get('sensor_pin'))
+        if self.mcu_adc.get_mcu() is not self.mcu_pwm.get_mcu():
+            raise pins.error("heater_pin and sensor_pin must be on same mcu")
         adc_range = [self.sensor.calc_adc(self.min_temp),
                      self.sensor.calc_adc(self.max_temp)]
         self.mcu_adc.setup_minmax(SAMPLE_TIME, SAMPLE_COUNT,

@@ -410,7 +410,8 @@ class MCU:
         self._printer = printer
         # Serial port
         self._serialport = config.get('serial', '/dev/ttyS0')
-        if self._serialport.startswith("/dev/rpmsg_"):
+        if (self._serialport.startswith("/dev/rpmsg_")
+            or self._serialport.startswith("/tmp/klipper_host_")):
             # Beaglbone PRU
             baud = 0
         else:
@@ -427,9 +428,12 @@ class MCU:
             self._restart_method = config.getchoice(
                 'restart_method', rmethods, 'arduino')
         # Config building
+        self._name = config.section
+        if self._name.startswith('mcu '):
+            self._name = self._name[4:]
         if printer.bglogger is not None:
-            printer.bglogger.set_rollover_info("mcu", None)
-        pins.get_printer_pins(printer).register_chip("mcu", self)
+            printer.bglogger.set_rollover_info(self._name, None)
+        pins.get_printer_pins(printer).register_chip(self._name, self)
         self._emergency_stop_cmd = None
         self._reset_cmd = self._config_reset_cmd = None
         self._oid_count = 0
@@ -503,9 +507,14 @@ class MCU:
         self._send_config()
     def _connect_file(self, pace=False):
         # In a debugging mode.  Open debug output file and read data dictionary
-        out_fname = self._printer.get_start_args().get('debugoutput')
+        start_args = self._printer.get_start_args()
+        if self._name == 'mcu':
+            out_fname = start_args.get('debugoutput')
+            dict_fname = start_args.get('dictionary')
+        else:
+            out_fname = start_args.get('debugoutput') + "-" + self._name
+            dict_fname = start_args.get('dictionary_' + self._name)
         outfile = open(out_fname, 'wb')
-        dict_fname = self._printer.get_start_args().get('dictionary')
         dfile = open(dict_fname, 'rb')
         dict_data = dfile.read()
         dfile.close()
@@ -644,7 +653,7 @@ class MCU:
                     len(msgparser.messages_by_id), msgparser.version),
                 "MCU config: %s" % (" ".join(
                     ["%s=%s" % (k, v) for k, v in msgparser.config.items()]))]
-            self._printer.bglogger.set_rollover_info("mcu", "\n".join(info))
+            self._printer.bglogger.set_rollover_info(self._name, "\n".join(info))
         self._steppersync = self._ffi_lib.steppersync_alloc(
             self.serial.serialqueue, self._stepqueues, len(self._stepqueues),
             move_count)
@@ -742,3 +751,30 @@ def error_help(msg):
 
 def add_printer_objects(printer, config):
     printer.add_object('mcu', MCU(printer, config.getsection('mcu')))
+    for s in config.get_prefix_sections('mcu '):
+        printer.add_object(s.section, MCU(printer, s))
+
+def get_printer_mcus(printer):
+    return [printer.objects[n] for n in sorted(printer.objects)
+            if n.startswith('mcu')]
+
+def mcu_restart(printer):
+    for m in get_printer_mcus(printer):
+        m.microcontroller_restart()
+
+def mcu_connect(printer):
+    for m in get_printer_mcus(printer):
+        m.connect()
+
+def mcu_disconnect(printer):
+    for m in get_printer_mcus(printer):
+        m.disconnect()
+
+def get_printer_mcu(printer, name):
+    mcu_name = name
+    if name != 'mcu':
+        mcu_name = 'mcu ' + name
+    mcu = printer.objects.get(mcu_name)
+    if mcu is None:
+        raise error("Unknown mcu %s" % (name,))
+    return mcu

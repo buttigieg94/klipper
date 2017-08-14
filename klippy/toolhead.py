@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import math, logging
-import homing, cartesian, corexy, delta, extruder
+import mcu, homing, cartesian, corexy, delta, extruder
 
 # Common suffixes: _d is distance (in mm), _v is velocity (in
 #   mm/second), _v2 is velocity squared (mm^2/s^2), _t is time (in
@@ -184,7 +184,8 @@ class ToolHead:
     def __init__(self, printer, config):
         self.printer = printer
         self.reactor = printer.reactor
-        self.mcu = printer.objects['mcu']
+        self.all_mcus = mcu.get_printer_mcus(printer)
+        self.mcu = self.all_mcus[0]
         self.max_velocity = config.getfloat('max_velocity', above=0.)
         self.max_accel = config.getfloat('max_accel', above=0.)
         self.max_accel_to_decel = config.getfloat(
@@ -365,7 +366,8 @@ class ToolHead:
             print_time, buffer_time, self.print_stall)
     def force_shutdown(self):
         try:
-            self.mcu.force_shutdown()
+            for m in self.all_mcus:
+                m.force_shutdown()
             self.move_queue.reset()
             self.reset_print_time()
         except:

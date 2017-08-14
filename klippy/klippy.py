@@ -140,7 +140,6 @@ class Printer:
         self.state_message = message_startup
         self.run_result = None
         self.fileconfig = None
-        self.mcu = None
     def get_start_args(self):
         return self.start_args
     def _stats(self, eventtime, force_output=False):
@@ -149,7 +148,8 @@ class Printer:
             self.gcode.dump_debug()
             self.need_dump_debug = False
         toolhead = self.objects.get('toolhead')
-        if toolhead is None or self.mcu is None:
+        m = self.objects.get('mcu')
+        if toolhead is None or m is None:
             return eventtime + 1.
         is_active, thstats = toolhead.stats(eventtime)
         if not is_active and not force_output:
@@ -157,7 +157,7 @@ class Printer:
         out = []
         out.append(self.gcode.stats(eventtime))
         out.append(thstats)
-        out.append(self.mcu.stats(eventtime))
+        out.append(m.stats(eventtime))
         logging.info("Stats %.1f: %s" % (eventtime, ' '.join(out)))
         return eventtime + 1.
     def add_object(self, name, obj):
@@ -175,7 +175,6 @@ class Printer:
         config = ConfigWrapper(self, 'printer')
         for m in [pins, mcu, chipmisc, toolhead, extruder, heater, fan]:
             m.add_printer_objects(self, config)
-        self.mcu = self.objects['mcu']
         # Validate that there are no undefined parameters in the config file
         valid_sections = { s: 1 for s, o in self.all_config_options }
         for section in self.fileconfig.sections():
@@ -194,7 +193,7 @@ class Printer:
             self._load_config()
             if self.start_args.get('debugoutput') is None:
                 self.reactor.update_timer(self.stats_timer, self.reactor.NOW)
-            self.mcu.connect()
+            mcu.mcu_connect(self)
             self.gcode.set_printer_ready(True)
             self.state_message = message_ready
         except (self.config_error, pins.error) as e:
@@ -231,10 +230,9 @@ class Printer:
         run_result = self.run_result
         try:
             self._stats(self.reactor.monotonic(), force_output=True)
-            if self.mcu is not None:
-                if run_result == 'firmware_restart':
-                    self.mcu.microcontroller_restart()
-                self.mcu.disconnect()
+            if run_result == 'firmware_restart':
+                mcu.mcu_restart(self)
+            mcu.mcu_disconnect(self)
         except:
             logging.exception("Unhandled exception during post run")
         return run_result
@@ -258,6 +256,15 @@ class Printer:
 # Startup
 ######################################################################
 
+def arg_dictionary(option, opt_str, value, parser):
+    key, fname = "dictionary", value
+    if '=' in value:
+        mcu_name, fname = value.split('=', 1)
+        key = "dictionary_" + mcu_name
+    if parser.values.dictionary is None:
+        parser.values.dictionary = {}
+    parser.values.dictionary[key] = fname
+
 def main():
     usage = "%prog [options] <config file>"
     opts = optparse.OptionParser(usage)
@@ -271,7 +278,8 @@ def main():
                     help="enable debug messages")
     opts.add_option("-o", "--debugoutput", dest="debugoutput",
                     help="write output to file instead of to serial port")
-    opts.add_option("-d", "--dictionary", dest="dictionary",
+    opts.add_option("-d", "--dictionary", dest="dictionary", type="string",
+                    action="callback", callback=arg_dictionary,
                     help="file to read for mcu protocol dictionary")
     options, args = opts.parse_args()
     if len(args) != 1:
@@ -291,7 +299,7 @@ def main():
         input_fd = util.create_pty(options.inputtty)
     if options.debugoutput:
         start_args['debugoutput'] = options.debugoutput
-        start_args['dictionary'] = options.dictionary
+        start_args.update(options.dictionary)
     if options.logfile:
         bglogger = queuelogger.setup_bg_logging(options.logfile, debuglevel)
     else:
