@@ -166,7 +166,7 @@ class MCU_endstop:
                                , self._oid)
     def home_start(self, print_time, rest_time):
         clock = self._mcu.print_time_to_clock(print_time)
-        rest_ticks = self._mcu.seconds_to_clock(rest_time)
+        rest_ticks = int(rest_time * self._mcu.get_adjusted_freq())
         self._homing = True
         self._min_query_time = self._mcu.monotonic()
         self._next_query_clock = clock + self._retry_query_ticks
@@ -696,7 +696,7 @@ class MCU:
         return clock / self._mcu_freq
     def estimated_print_time(self, eventtime):
         return self.clock_to_print_time(self.serial.get_clock(eventtime))
-    def get_mcu_freq(self):
+    def get_adjusted_freq(self):
         return self._mcu_freq
     def seconds_to_clock(self, time):
         return int(time * self._mcu_freq)
