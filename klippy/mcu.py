@@ -438,6 +438,7 @@ class MCU:
         self._pin_map = config.get('pin_map', None)
         self._custom = config.get('custom', '')
         self._mcu_freq = 1.
+        self._max_print_time = 0.
         # Move command queuing
         ffi_main, self._ffi_lib = chelper.get_ffi()
         self._max_stepper_error = config.getfloat(
@@ -707,10 +708,11 @@ class MCU:
     # Move command queuing
     def send(self, cmd, minclock=0, reqclock=0, cq=None):
         self.serial.send(cmd, minclock, reqclock, cq=cq)
-    def flush_moves(self, print_time):
+    def flush_moves(self, flush_time, print_time):
         if self._steppersync is None:
             return
-        clock = self.print_time_to_clock(print_time)
+        self._max_print_time = print_time
+        clock = self.print_time_to_clock(flush_time)
         ret = self._ffi_lib.steppersync_flush(self._steppersync, clock)
         if ret:
             raise error("Internal error in stepcompress")
@@ -720,6 +722,54 @@ class MCU:
         return self._printer.reactor.monotonic()
     def __del__(self):
         self.disconnect()
+
+class TimeSyncMCU(MCU):
+    def __init__(self, printer, config, main_mcu):
+        MCU.__init__(self, printer, config)
+        self._main_mcu = main_mcu
+        self._calibrate_timer = None
+        self._adjusted_freq = self._adjusted_offset = 1.
+    def connect(self):
+        MCU.connect(self)
+        self._adjusted_offset = 0.
+        self._adjusted_freq = self._mcu_freq
+        if self.is_fileoutput():
+            return
+        curtime = self.monotonic()
+        main_print_time = self._main_mcu.estimated_print_time(curtime)
+        local_print_time = self.estimated_print_time(curtime)
+        self._adjusted_offset = main_print_time - local_print_time
+        self._calibrate_timer = self._printer.reactor.register_timer(
+            self._calibrate_handler, self._calibrate_handler(curtime))
+        self._ffi_lib.steppersync_set_time(
+            self._steppersync, self._adjusted_offset, self._adjusted_freq)
+    def print_time_to_clock(self, print_time):
+        return int((print_time - self._adjusted_offset) * self._adjusted_freq)
+    def clock_to_print_time(self, clock):
+        return clock / self._adjusted_freq + self._adjusted_offset
+    def get_adjusted_freq(self):
+        return self._adjusted_freq
+    def _calibrate_handler(self, eventtime):
+        #logging.debug("calibrate: %.3f: %.6f vs %.6f",
+        #              eventtime,
+        #              self.estimated_print_time(eventtime),
+        #              self._main_mcu.estimated_print_time(eventtime))
+        ser_clock, ser_clock_time, ser_freq = self._main_mcu.get_last_clock()
+        main_mcu_freq = self._main_mcu.get_adjusted_freq()
+
+        main_clock = (eventtime - ser_clock_time) * ser_freq + ser_clock
+        print_time = max(self._max_print_time, main_clock / main_mcu_freq)
+        main_sync_clock = (print_time + 2.) * main_mcu_freq
+        sync_time = ser_clock_time + (main_sync_clock - ser_clock) / ser_freq
+
+        print_clock = self.print_time_to_clock(print_time)
+        sync_clock = self.serial.get_clock(sync_time)
+        self._adjusted_freq = .5 * (sync_clock - print_clock)
+        self._adjusted_offset = print_time - print_clock / self._adjusted_freq
+
+        self._ffi_lib.steppersync_set_time(
+            self._steppersync, self._adjusted_offset, self._adjusted_freq)
+        return eventtime + 1.
 
 Common_MCU_errors = {
     ("Timer too close", "No next step", "Missed scheduling of next "): """
@@ -745,9 +795,10 @@ def error_help(msg):
     return ""
 
 def add_printer_objects(printer, config):
-    printer.add_object('mcu', MCU(printer, config.getsection('mcu')))
+    main_mcu = MCU(printer, config.getsection('mcu'))
+    printer.add_object('mcu', main_mcu)
     for s in config.get_prefix_sections('mcu '):
-        printer.add_object(s.section, MCU(printer, s))
+        printer.add_object(s.section, TimeSyncMCU(printer, s, main_mcu))
 
 def get_printer_mcus(printer):
     return [printer.objects[n] for n in sorted(printer.objects)
