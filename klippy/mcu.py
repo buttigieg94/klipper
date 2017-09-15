@@ -207,7 +207,7 @@ class MCU_endstop:
                 raise error("Timeout during endstop homing")
         if self._mcu.is_shutdown:
             raise error("MCU is shutdown")
-        last_clock, last_clock_time = self._mcu.get_last_clock()
+        last_clock, last_clock_time, est_freq = self._mcu.get_last_clock()
         if last_clock >= self._next_query_clock:
             self._next_query_clock = last_clock + self._retry_query_ticks
             msg = self._query_cmd.encode(self._oid)
@@ -371,7 +371,7 @@ class MCU_adc:
         self._oid = self._mcu.create_oid()
         self._mcu.add_config_cmd("config_analog_in oid=%d pin=%s" % (
             self._oid, self._pin))
-        last_clock, last_clock_time = self._mcu.get_last_clock()
+        last_clock, last_clock_time, est_freq = self._mcu.get_last_clock()
         clock = last_clock + self._mcu.seconds_to_clock(
             1.0 + self._oid * 0.01) # XXX
         sample_ticks = self._mcu.seconds_to_clock(self._sample_time)
@@ -519,7 +519,7 @@ class MCU:
                 return 0.
             self.estimated_print_time = dummy_estimated_print_time
     def timeout_handler(self, eventtime):
-        last_clock, last_clock_time = self.serial.get_last_clock()
+        last_clock, last_clock_time, est_freq = self.get_last_clock()
         timeout = last_clock_time + self.COMM_TIMEOUT
         if eventtime < timeout:
             return timeout
@@ -548,7 +548,7 @@ class MCU:
             chelper.run_hub_ctrl(1)
             return
         if self._restart_method == 'command':
-            last_clock, last_clock_time = self.serial.get_last_clock()
+            last_clock, last_clock_time, est_freq = self.get_last_clock()
             eventtime = reactor.monotonic()
             if ((self._reset_cmd is None and self._config_reset_cmd is None)
                 or eventtime > last_clock_time + self.COMM_TIMEOUT):
